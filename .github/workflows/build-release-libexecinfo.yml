@@ -2,7 +2,7 @@ name: libexecinfo CI/CD
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["main"]
     paths:
       - '**.c'
       - '**.h'
@@ -10,7 +10,7 @@ on:
       - 'Makefile'
       - '.github/workflows/**'
   pull_request:
-    branches: ["main", "master"]
+    branches: ["main"]
   workflow_dispatch:
 
 env:
@@ -80,6 +80,8 @@ jobs:
 
     - name: Run basic tests
       run: |
+        # Set LD_LIBRARY_PATH to include current directory for dynamic linking
+        export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
         ./test
         echo "Testing pkg-config generation..."
         make libexecinfo.pc
@@ -96,6 +98,8 @@ jobs:
     - name: Memory leak check (Debug builds only)
       if: matrix.build_type == 'debug' && matrix.compiler == 'gcc'
       run: |
+        # Set LD_LIBRARY_PATH for valgrind as well
+        export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
         valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test
 
   create-release:
