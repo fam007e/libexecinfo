@@ -88,7 +88,7 @@ $(STATIC_LIB): $(OBJECTS)
 dynamic: $(SHARED_LIB)
 
 $(SHARED_LIB): $(SHARED_OBJECTS)
-	$(CC) -shared -Wl,-soname,$(SONAME) $(EXECINFO_LDFLAGS) -o $@ $^
+	$(CC) -shared -Wl,-soname,$(SONAME) $(EXECINFO_LDFLAGS) -o $@ $^ -lm
 	ln -sf $@ $(SONAME)
 	ln -sf $@ libexecinfo.so
 
@@ -99,11 +99,15 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 %.So: %.c
 	$(CC) $(EXECINFO_CFLAGS) -fPIC -DPIC -o $@ $<
 
-# Test program
+# Test program - link against static library to avoid circular dependency
 test: $(TEST_BINARY)
 
 $(TEST_BINARY): test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) -o $@ $< -L. -lexecinfo -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) -o $@ $< -L. -lexecinfo -lm -ldl
+
+# Test program using dynamic library (alternative target)
+test-dynamic: test.c $(SHARED_LIB)
+	$(CC) $(CFLAGS) $(STD_CFLAGS) -o $(TEST_BINARY) $< -L. -lexecinfo -lm -ldl
 
 # Generate pkg-config file
 libexecinfo.pc:
@@ -115,7 +119,7 @@ libexecinfo.pc:
 	@echo "Name: libexecinfo" >> $@
 	@echo "Description: BSD backtrace library" >> $@
 	@echo "Version: $(VERSION)" >> $@
-	@echo "Libs: -L\$${libdir} -lexecinfo" >> $@
+	@echo "Libs: -L\$${libdir} -lexecinfo -lm" >> $@
 	@echo "Cflags: -I\$${includedir}" >> $@
 
 # Installation targets
@@ -157,7 +161,8 @@ help:
 	@echo "  all              - Build static and dynamic libraries (default)"
 	@echo "  static           - Build static library only"
 	@echo "  dynamic          - Build dynamic library only"
-	@echo "  test             - Build test program"
+	@echo "  test             - Build test program (using static library)"
+	@echo "  test-dynamic     - Build test program (using dynamic library)"
 	@echo "  generate         - Generate source files"
 	@echo "  install          - Install everything"
 	@echo "  install-static   - Install static library"
