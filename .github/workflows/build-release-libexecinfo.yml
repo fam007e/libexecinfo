@@ -1,0 +1,330 @@
+name: libexecinfo CI/CD
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - '**.c'
+      - '**.h'
+      - '**.py'
+      - 'Makefile'
+      - '.github/workflows/**'
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [debug, release]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-${{ hashFiles('**/Makefile') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          build-essential \
+          python3 \
+          pkg-config \
+          binutils-dev \
+          libc6-dev \
+          clang \
+          valgrind \
+          gdb
+
+    - name: Set compiler
+      run: |
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          echo "CC=clang" >> $GITHUB_ENV
+        else
+          echo "CC=gcc" >> $GITHUB_ENV
+        fi
+
+    - name: Set build type
+      run: |
+        if [ "${{ matrix.build_type }}" = "debug" ]; then
+          echo "DEBUG=1" >> $GITHUB_ENV
+        else
+          echo "DEBUG=0" >> $GITHUB_ENV
+        fi
+
+    - name: Generate source files
+      run: make generate
+
+    - name: Build static library
+      run: make static
+
+    - name: Build dynamic library
+      run: make dynamic
+
+    - name: Build test program
+      run: make test
+
+    - name: Run basic tests
+      run: |
+        ./test
+        echo "Testing pkg-config generation..."
+        make libexecinfo.pc
+        pkg-config --validate libexecinfo.pc
+
+    - name: Run validation script
+      run: |
+        # Install locally for testing
+        sudo make install PREFIX=/usr
+        sudo ldconfig
+        chmod +x validation-script.sh
+        ./validation-script.sh
+
+    - name: Memory leak check (Debug builds only)
+      if: matrix.build_type == 'debug' && matrix.compiler == 'gcc'
+      run: |
+        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test
+
+  create-release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          build-essential \
+          python3 \
+          pkg-config \
+          tar \
+          gzip \
+          gh
+
+    - name: Authenticate GitHub CLI
+      run: |
+        echo "${{ secrets.LIBEXEC_TOKEN }}" | gh auth login --with-token
+
+    - name: Generate version info
+      id: version
+      run: |
+        VERSION_MAJOR=$(grep "VERSION_MAJOR" Makefile | head -1 | cut -d'=' -f2 | tr -d ' ')
+        VERSION_MINOR=$(grep "VERSION_MINOR" Makefile | head -1 | cut -d'=' -f2 | tr -d ' ')
+        VERSION_PATCH=$(grep "VERSION_PATCH" Makefile | head -1 | cut -d'=' -f2 | tr -d ' ')
+        VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+        BUILD_NUM=$(git rev-list --count HEAD)
+        FULL_VERSION="${VERSION}.${BUILD_NUM}"
+        RELEASE_DATE=$(date +'%Y-%m-%d')
+        
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "full_version=${FULL_VERSION}" >> $GITHUB_OUTPUT
+        echo "build_num=${BUILD_NUM}" >> $GITHUB_OUTPUT
+        echo "release_date=${RELEASE_DATE}" >> $GITHUB_OUTPUT
+
+    - name: Build release binaries
+      run: |
+        # Clean build
+        make clean
+        
+        # Generate sources
+        make generate
+        
+        # Build both static and dynamic libraries
+        make all
+        
+        # Build test program
+        make test
+        
+        # Generate pkg-config
+        make libexecinfo.pc
+
+    - name: Create release directory structure
+      run: |
+        mkdir -p release/libexecinfo-${{ steps.version.outputs.version }}
+        mkdir -p release/libexecinfo-${{ steps.version.outputs.version }}/lib
+        mkdir -p release/libexecinfo-${{ steps.version.outputs.version }}/include
+        mkdir -p release/libexecinfo-${{ steps.version.outputs.version }}/pkgconfig
+        mkdir -p release/libexecinfo-${{ steps.version.outputs.version }}/examples
+        mkdir -p release/libexecinfo-${{ steps.version.outputs.version }}/doc
+
+    - name: Copy release files
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        RELEASE_DIR="release/libexecinfo-${VERSION}"
+        
+        # Libraries
+        cp libexecinfo.a "${RELEASE_DIR}/lib/"
+        cp libexecinfo.so.${VERSION} "${RELEASE_DIR}/lib/"
+        ln -sf libexecinfo.so.${VERSION} "${RELEASE_DIR}/lib/libexecinfo.so.1"
+        ln -sf libexecinfo.so.${VERSION} "${RELEASE_DIR}/lib/libexecinfo.so"
+        
+        # Headers
+        cp execinfo.h "${RELEASE_DIR}/include/"
+        cp stacktraverse.h "${RELEASE_DIR}/include/"
+        
+        # Pkg-config
+        cp libexecinfo.pc "${RELEASE_DIR}/pkgconfig/"
+        
+        # Examples and test
+        cp test.c "${RELEASE_DIR}/examples/"
+        cp test "${RELEASE_DIR}/examples/"
+        
+        # Documentation
+        cp README.md "${RELEASE_DIR}/doc/"
+        cp LICENSE "${RELEASE_DIR}/doc/"
+        cp CONTRIBUTING.md "${RELEASE_DIR}/doc/" 2>/dev/null || true
+        
+        # Build tools (for reference)
+        cp Makefile "${RELEASE_DIR}/"
+        cp gen.py "${RELEASE_DIR}/"
+        cp validation-script.sh "${RELEASE_DIR}/"
+        chmod +x "${RELEASE_DIR}/validation-script.sh"
+
+    - name: Create installation script
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        RELEASE_DIR="release/libexecinfo-${VERSION}"
+        cat > "${RELEASE_DIR}/install.sh" << 'EOF'
+        #!/bin/bash
+        # libexecinfo installation script
+
+        set -e
+
+        PREFIX="${1:-/usr/local}"
+        LIBDIR="${PREFIX}/lib"
+        INCLUDEDIR="${PREFIX}/include"
+        PKGCONFIGDIR="${LIBDIR}/pkgconfig"
+
+        echo "Installing libexecinfo to ${PREFIX}..."
+
+        # Create directories
+        mkdir -p "${LIBDIR}" "${INCLUDEDIR}" "${PKGCONFIGDIR}"
+
+        # Install libraries
+        cp lib/libexecinfo.a "${LIBDIR}/"
+        cp lib/libexecinfo.so.* "${LIBDIR}/"
+        ln -sf libexecinfo.so.* "${LIBDIR}/libexecinfo.so.1" 2>/dev/null || true
+        ln -sf libexecinfo.so.* "${LIBDIR}/libexecinfo.so" 2>/dev/null || true
+
+        # Install headers
+        cp include/*.h "${INCLUDEDIR}/"
+
+        # Install pkg-config
+        sed "s|/usr/local|${PREFIX}|g" pkgconfig/libexecinfo.pc > "${PKGCONFIGDIR}/libexecinfo.pc"
+
+        # Update library cache
+        if command -v ldconfig >/dev/null 2>&1; then
+            ldconfig "${LIBDIR}" 2>/dev/null || true
+        fi
+
+        echo "Installation complete!"
+        echo "Use: pkg-config --cflags --libs libexecinfo"
+        EOF
+        chmod +x "${RELEASE_DIR}/install.sh"
+
+    - name: Create release archive
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        cd release
+        tar -czf "libexecinfo-${VERSION}.tar.gz" "libexecinfo-${VERSION}/"
+        
+        # Create checksums
+        sha256sum "libexecinfo-${VERSION}.tar.gz" > "libexecinfo-${VERSION}.tar.gz.sha256"
+        md5sum "libexecinfo-${VERSION}.tar.gz" > "libexecinfo-${VERSION}.tar.gz.md5"
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        CHANGELOG=$(git log --oneline --pretty=format:"* %s (%h)" --since="7 days ago" | head -20)
+        if [ -z "$CHANGELOG" ]; then
+          CHANGELOG="* Build ${{ steps.version.outputs.build_num }} - Automated release"
+        fi
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub release
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        FULL_VERSION=${{ steps.version.outputs.full_version }}
+        RELEASE_DATE=${{ steps.version.outputs.release_date }}
+        
+        # Create release notes
+        cat > release_notes.md << EOF
+        # libexecinfo v${FULL_VERSION}
+        
+        **Release Date:** ${RELEASE_DATE}  
+        **Build Number:** ${{ steps.version.outputs.build_num }}
+        
+        ## Features
+        - BSD-compatible backtrace library implementation
+        - Static and dynamic library builds
+        - Stack traversal with GCC builtins
+        - Comprehensive symbol resolution
+        - Memory-safe implementations
+        
+        ## Installation
+        \`\`\`bash
+        tar -xzf libexecinfo-${VERSION}.tar.gz
+        cd libexecinfo-${VERSION}
+        ./install.sh [PREFIX]
+        \`\`\`
+        
+        Or use pkg-config after installation:
+        \`\`\`bash
+        gcc myprogram.c \$(pkg-config --cflags --libs libexecinfo)
+        \`\`\`
+        
+        ## Changes
+        ${{ steps.changelog.outputs.changelog }}
+        
+        ## Files
+        - \`libexecinfo-${VERSION}.tar.gz\` - Complete source and binary package
+        - \`libexecinfo-${VERSION}.tar.gz.sha256\` - SHA256 checksum
+        - \`libexecinfo-${VERSION}.tar.gz.md5\` - MD5 checksum
+        
+        ## Verification
+        \`\`\`bash
+        sha256sum -c libexecinfo-${VERSION}.tar.gz.sha256
+        \`\`\`
+        EOF
+        
+        # Create the release
+        gh release create "v${FULL_VERSION}" \
+          release/libexecinfo-${VERSION}.tar.gz \
+          release/libexecinfo-${VERSION}.tar.gz.sha256 \
+          release/libexecinfo-${VERSION}.tar.gz.md5 \
+          --title "libexecinfo v${FULL_VERSION}" \
+          --notes-file release_notes.md \
+          --draft=false \
+          --prerelease=false
+
+    - name: Update latest tag
+      run: |
+        git tag -f latest
+        git push origin --tags --force
+
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -rf release/
+        make clean
