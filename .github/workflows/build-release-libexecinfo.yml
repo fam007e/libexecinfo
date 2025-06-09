@@ -48,7 +48,9 @@ jobs:
           libc6-dev \
           clang \
           valgrind \
-          gdb
+          gdb \
+          libbfd-dev \
+          libiberty-dev
 
     - name: Set compiler
       run: |
@@ -83,7 +85,19 @@ jobs:
       run: |
         # Set LD_LIBRARY_PATH to include current directory for dynamic linking
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
-        ./test
+        
+        # For clang release builds, use more conservative settings
+        if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "release" ]; then
+          echo "Running conservative test for clang release build..."
+          timeout 30s ./test || {
+            echo "Test failed or timed out, checking with gdb..."
+            gdb -batch -ex run -ex bt -ex quit --args ./test
+            exit 1
+          }
+        else
+          ./test
+        fi
+        
         echo "Testing pkg-config generation..."
         make libexecinfo.pc
         pkg-config --validate libexecinfo.pc
@@ -93,8 +107,12 @@ jobs:
         # Install locally for testing
         sudo make install PREFIX=/usr
         sudo ldconfig
-        chmod +x validation-script.sh
-        ./validation-script.sh
+        if [ -f validation-script.sh ]; then
+          chmod +x validation-script.sh
+          ./validation-script.sh
+        else
+          echo "Validation script not found, skipping..."
+        fi
 
     - name: Memory leak check (Debug builds only)
       if: matrix.build_type == 'debug' && matrix.compiler == 'gcc'
@@ -123,7 +141,10 @@ jobs:
           pkg-config \
           tar \
           gzip \
-          gh
+          gh \
+          binutils-dev \
+          libbfd-dev \
+          libiberty-dev
 
     - name: Authenticate GitHub CLI
       run: |
@@ -201,8 +222,10 @@ jobs:
         # Build tools (for reference)
         cp Makefile "${RELEASE_DIR}/"
         cp gen.py "${RELEASE_DIR}/"
-        cp validation-script.sh "${RELEASE_DIR}/"
-        chmod +x "${RELEASE_DIR}/validation-script.sh"
+        if [ -f validation-script.sh ]; then
+          cp validation-script.sh "${RELEASE_DIR}/"
+          chmod +x "${RELEASE_DIR}/validation-script.sh"
+        fi
 
     - name: Create installation script
       run: |

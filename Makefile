@@ -35,22 +35,28 @@ SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
 # Standard compliance
 STD_CFLAGS = -std=gnu11
 
-# Architecture-specific optimizations
-ARCH_CFLAGS = -march=native -mtune=native
-
 # Debug vs Release
 DEBUG ?= 0
 ifeq ($(DEBUG), 1)
     BUILD_CFLAGS = -O0 -g3 -DDEBUG -fsanitize=address -fsanitize=undefined
     BUILD_LDFLAGS = -fsanitize=address -fsanitize=undefined
+    ARCH_CFLAGS = 
 else
-    BUILD_CFLAGS = -O2 -g -DNDEBUG -flto
-    BUILD_LDFLAGS = -flto -Wl,-O1 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now
+    # More conservative optimization for clang compatibility
+    ifeq ($(CC), clang)
+        BUILD_CFLAGS = -O2 -g -DNDEBUG
+        BUILD_LDFLAGS = -Wl,-O1 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now
+        ARCH_CFLAGS = 
+    else
+        BUILD_CFLAGS = -O2 -g -DNDEBUG -flto
+        BUILD_LDFLAGS = -flto -Wl,-O1 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now
+        ARCH_CFLAGS = -march=native -mtune=native
+    endif
 endif
 
 # Final flags
 EXECINFO_CFLAGS = $(CPPFLAGS) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) \
-                  $(BUILD_CFLAGS) -c
+                  $(BUILD_CFLAGS) $(ARCH_CFLAGS) -c
 EXECINFO_LDFLAGS = $(LDFLAGS) $(BUILD_LDFLAGS)
 
 # Source files
@@ -88,7 +94,7 @@ $(STATIC_LIB): $(OBJECTS)
 dynamic: $(SHARED_LIB)
 
 $(SHARED_LIB): $(SHARED_OBJECTS)
-	$(CC) -shared -Wl,-soname,$(SONAME) $(EXECINFO_LDFLAGS) -o $@ $^ -lm
+	$(CC) -shared -Wl,-soname,$(SONAME) $(EXECINFO_LDFLAGS) -o $@ $^ -lm -ldl
 	ln -sf $@ $(SONAME)
 	ln -sf $@ libexecinfo.so
 
@@ -103,11 +109,11 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 test: $(TEST_BINARY)
 
 $(TEST_BINARY): test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) -o $@ $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
 
 # Test program using dynamic library (alternative target)
 test-dynamic: test.c $(SHARED_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) -o $(TEST_BINARY) $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) -rdynamic -o $(TEST_BINARY) $< -L. -lexecinfo -lm -ldl
 
 # Generate pkg-config file
 libexecinfo.pc:
@@ -119,7 +125,7 @@ libexecinfo.pc:
 	@echo "Name: libexecinfo" >> $@
 	@echo "Description: BSD backtrace library" >> $@
 	@echo "Version: $(VERSION)" >> $@
-	@echo "Libs: -L\$${libdir} -lexecinfo -lm" >> $@
+	@echo "Libs: -L\$${libdir} -lexecinfo -lm -ldl" >> $@
 	@echo "Cflags: -I\$${includedir}" >> $@
 
 # Installation targets
