@@ -28,35 +28,42 @@ CFLAGS ?= -O2 -g
 LDFLAGS ?=
 
 # Security and modern compiler flags
-SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
-                  -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                  -Wnull-dereference -Wstack-protector -Wtrampolines
+ifeq ($(DEBUG), 1)
+    SECURITY_CFLAGS = -fstack-protector-strong \
+                      -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
+                      -Wnull-dereference -Wstack-protector -Wtrampolines
+else
+    SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+                      -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
+                      -Wnull-dereference -Wstack-protector -Wtrampolines
+endif
 
 # Standard compliance
 STD_CFLAGS = -std=gnu11
 
 # Debug vs Release
 DEBUG ?= 0
+
 ifeq ($(DEBUG), 1)
-    BUILD_CFLAGS = -O0 -g3 -DDEBUG -fsanitize=address -fsanitize=undefined
-    BUILD_LDFLAGS = -fsanitize=address -fsanitize=undefined
-    ARCH_CFLAGS = 
+    SECURITY_CFLAGS = -fstack-protector-strong \
+                      -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
+                      -Wnull-dereference -Wstack-protector -Wtrampolines \
+                      -fno-omit-frame-pointer
 else
-    # More conservative optimization for clang compatibility
-    ifeq ($(CC), clang)
-        BUILD_CFLAGS = -O2 -g -DNDEBUG
-        BUILD_LDFLAGS = -Wl,-O1 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now
-        ARCH_CFLAGS = 
-    else
-        BUILD_CFLAGS = -O2 -g -DNDEBUG -flto
-        BUILD_LDFLAGS = -flto -Wl,-O1 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now
-        ARCH_CFLAGS = -march=native -mtune=native
-    endif
+    SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+                      -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
+                      -Wnull-dereference -Wstack-protector -Wtrampolines \
+                      -fno-omit-frame-pointer
 endif
+
+
+
+
+
 
 # Final flags
 EXECINFO_CFLAGS = $(CPPFLAGS) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) \
-                  $(BUILD_CFLAGS) $(ARCH_CFLAGS) -c
+                  $(BUILD_CFLAGS) $(ARCH_CFLAGS) -Wno-frame-address -c
 EXECINFO_LDFLAGS = $(LDFLAGS) $(BUILD_LDFLAGS)
 
 # Source files
@@ -72,7 +79,7 @@ STATIC_LIB = libexecinfo.a
 SHARED_LIB = libexecinfo.so.$(VERSION)
 TEST_BINARY = test
 
-.PHONY: all static dynamic test clean install install-static install-dynamic \
+.PHONY: all static dynamic test test-dynamic clean install install-static install-dynamic \
         install-headers install-pkgconfig uninstall help generate
 
 # Default target
@@ -105,17 +112,17 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 %.So: %.c
 	$(CC) $(EXECINFO_CFLAGS) -fPIC -DPIC -o $@ $<
 
-# Test program - link against static library to avoid circular dependency
+# Test program
 test: $(TEST_BINARY)
 
 $(TEST_BINARY): test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
 
-# Test program using dynamic library (alternative target)
+# Test using dynamic lib
 test-dynamic: test.c $(SHARED_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) -rdynamic -o $(TEST_BINARY) $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $(TEST_BINARY) $< -L. -lexecinfo -lm -ldl
 
-# Generate pkg-config file
+# Pkg-config file
 libexecinfo.pc:
 	@echo "prefix=$(PREFIX)" > $@
 	@echo "exec_prefix=\$${prefix}" >> $@
@@ -128,7 +135,7 @@ libexecinfo.pc:
 	@echo "Libs: -L\$${libdir} -lexecinfo -lm -ldl" >> $@
 	@echo "Cflags: -I\$${includedir}" >> $@
 
-# Installation targets
+# Install targets
 install: install-dynamic install-static install-headers install-pkgconfig
 
 install-static: $(STATIC_LIB)
@@ -159,7 +166,7 @@ clean:
 	rm -f *.o *.So *.a *.so *.so.* $(TEST_BINARY) libexecinfo.pc
 	rm -f $(GENERATED_FILES)
 
-# Help target
+# Help
 help:
 	@echo "libexecinfo build system"
 	@echo ""
@@ -167,15 +174,11 @@ help:
 	@echo "  all              - Build static and dynamic libraries (default)"
 	@echo "  static           - Build static library only"
 	@echo "  dynamic          - Build dynamic library only"
-	@echo "  test             - Build test program (using static library)"
-	@echo "  test-dynamic     - Build test program (using dynamic library)"
-	@echo "  generate         - Generate source files"
+	@echo "  test             - Build test program (static lib)"
+	@echo "  test-dynamic     - Build test program (dynamic lib)"
+	@echo "  generate         - Generate stacktraverse.c"
 	@echo "  install          - Install everything"
-	@echo "  install-static   - Install static library"
-	@echo "  install-dynamic  - Install dynamic library"
-	@echo "  install-headers  - Install header files"
-	@echo "  clean            - Remove build artifacts"
-	@echo "  help             - Show this help"
+	@echo "  clean            - Clean build artifacts"
 	@echo ""
 	@echo "Variables:"
 	@echo "  DEBUG=1          - Enable debug build with sanitizers"
