@@ -67,14 +67,12 @@ safe_printf(const char *format, ...)
 
 /**
  * Free an array of strings allocated by backtrace_symbols
+ * (glibc-compatible: only free the pointer, not each string)
  */
 static void
 free_bt_symbols(char **symbols, int size)
 {
     if (!symbols) return;
-    for (int i = 0; i < size; i++) {
-        free(symbols[i]);
-    }
     free(symbols);
 }
 

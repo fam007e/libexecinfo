@@ -31,11 +31,16 @@ LDFLAGS ?=
 ifeq ($(DEBUG), 1)
     SECURITY_CFLAGS = -fstack-protector-strong \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                      -Wnull-dereference -Wstack-protector -Wtrampolines
+                      -Wnull-dereference -Wstack-protector -Wtrampolines \
+                      -fsanitize=address \
+                      -fno-omit-frame-pointer
+    SECURITY_LDFLAGS = -fsanitize=address
 else
     SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                      -Wnull-dereference -Wstack-protector -Wtrampolines
+                      -Wnull-dereference -Wstack-protector -Wtrampolines \
+                      -fno-omit-frame-pointer
+    SECURITY_LDFLAGS =
 endif
 
 # Standard compliance
@@ -48,7 +53,8 @@ ifeq ($(DEBUG), 1)
     SECURITY_CFLAGS = -fstack-protector-strong \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
                       -Wnull-dereference -Wstack-protector -Wtrampolines \
-                      -fsanitize=address
+                      -fsanitize=address \
+                      -fno-omit-frame-pointer
     SECURITY_LDFLAGS = -fsanitize=address
 else
     SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
@@ -113,7 +119,7 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 test: $(TEST_BINARY)
 
 $(TEST_BINARY): test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
 
 # Test using dynamic lib
 test-dynamic: test.c $(SHARED_LIB)
@@ -122,15 +128,15 @@ test-dynamic: test.c $(SHARED_LIB)
 # Pkg-config file
 libexecinfo.pc:
 	@echo "prefix=$(PREFIX)" > $@
-	@echo "exec_prefix=\$${prefix}" >> $@
+	@echo "exec_prefix=$${prefix}" >> $@
 	@echo "libdir=$(LIBDIR)" >> $@
 	@echo "includedir=$(INCLUDEDIR)" >> $@
 	@echo "" >> $@
 	@echo "Name: libexecinfo" >> $@
 	@echo "Description: BSD backtrace library" >> $@
 	@echo "Version: $(VERSION)" >> $@
-	@echo "Libs: -L\$${libdir} -lexecinfo -lm -ldl" >> $@
-	@echo "Cflags: -I\$${includedir}" >> $@
+	@echo "Libs: -L$${libdir} -lexecinfo -lm -ldl" >> $@
+	@echo "Cflags: -I$${includedir}" >> $@
 
 # Install targets
 install: install-dynamic install-static install-headers install-pkgconfig
