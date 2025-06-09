@@ -16,6 +16,11 @@ on:
 env:
   DEBIAN_FRONTEND: noninteractive
 
+# Add permissions at the workflow level
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -123,11 +128,18 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     
+    # Add specific permissions for this job
+    permissions:
+      contents: write
+      packages: write
+      
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        # Use a personal access token instead of the default GITHUB_TOKEN
+        token: ${{ secrets.LIBEXEC_TOKEN }}
 
     - name: Install dependencies
       run: |
@@ -345,6 +357,11 @@ jobs:
 
     - name: Update latest tag
       run: |
+        # Configure git with the token
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Create and push the tag
         git tag -f latest
         git push origin --tags --force
 
