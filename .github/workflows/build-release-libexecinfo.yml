@@ -80,27 +80,35 @@ jobs:
 
     - name: Build test program
       run: make test
-
+    
+    
     - name: Run basic tests
       run: |
-        # Set LD_LIBRARY_PATH to include current directory for dynamic linking
+        # Enable core dumps for debugging crashes
+        ulimit -c unlimited
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
-        
-        # For clang release builds, use more conservative settings
+  
+        # For clang release builds, use more conservative settings and enhanced gdb output
         if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "release" ]; then
           echo "Running conservative test for clang release build..."
           timeout 30s ./test || {
-            echo "Test failed or timed out, checking with gdb..."
-            gdb -batch -ex run -ex bt -ex quit --args ./test
+            echo "Test failed or timed out, checking with gdb (full backtrace)..."
+            gdb -batch -ex "set pagination off" -ex "run" -ex "bt full" -ex "info locals" -ex "info registers" -ex "quit" --args ./test
             exit 1
           }
         else
           ./test
         fi
-        
+  
         echo "Testing pkg-config generation..."
         make libexecinfo.pc
-        pkg-config --validate libexecinfo.pc
+        pkg-config --validate libexecinfo.pc    
+
+    - name: AddressSanitizer (ASan) check (Debug builds only)
+      if: matrix.build_type == 'debug'
+      run: |
+        export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
+        ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./test
 
     - name: Run validation script
       run: |

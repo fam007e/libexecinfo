@@ -48,18 +48,15 @@ ifeq ($(DEBUG), 1)
     SECURITY_CFLAGS = -fstack-protector-strong \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
                       -Wnull-dereference -Wstack-protector -Wtrampolines \
-                      -fno-omit-frame-pointer
+                      -fsanitize=address
+    SECURITY_LDFLAGS = -fsanitize=address
 else
     SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
                       -Wnull-dereference -Wstack-protector -Wtrampolines \
                       -fno-omit-frame-pointer
+    SECURITY_LDFLAGS =
 endif
-
-
-
-
-
 
 # Final flags
 EXECINFO_CFLAGS = $(CPPFLAGS) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) \
@@ -116,7 +113,7 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 test: $(TEST_BINARY)
 
 $(TEST_BINARY): test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
 
 # Test using dynamic lib
 test-dynamic: test.c $(SHARED_LIB)
