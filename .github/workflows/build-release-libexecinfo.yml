@@ -80,8 +80,7 @@ jobs:
 
     - name: Build test program
       run: make test
-    
-    
+
     - name: Run basic tests
       run: |
         # Enable core dumps for debugging crashes
@@ -110,10 +109,12 @@ jobs:
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
         ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./test
 
-    - name: Memory leak check (Debug builds only)
+    # Rebuild without ASan for Valgrind memory leak check
+    - name: Memory leak check (Valgrind, debug/gcc only, non-ASan build)
       if: matrix.build_type == 'debug' && matrix.compiler == 'gcc'
       run: |
-        # Set LD_LIBRARY_PATH for valgrind as well
+        make clean
+        make DEBUG=0 test
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
         valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test
 
