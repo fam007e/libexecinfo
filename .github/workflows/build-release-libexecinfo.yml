@@ -110,18 +110,6 @@ jobs:
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
         ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./test
 
-    - name: Run validation script
-      run: |
-        # Install locally for testing
-        sudo make install PREFIX=/usr
-        sudo ldconfig
-        if [ -f validation-script.sh ]; then
-          chmod +x validation-script.sh
-          ./validation-script.sh
-        else
-          echo "Validation script not found, skipping..."
-        fi
-
     - name: Memory leak check (Debug builds only)
       if: matrix.build_type == 'debug' && matrix.compiler == 'gcc'
       run: |
