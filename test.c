@@ -44,7 +44,6 @@ static void safe_printf(const char *format, ...);
 /**
  * Safe printf wrapper that handles potential issues
  */
-
 static void
 safe_printf(const char *format, ...)
 {
@@ -66,7 +65,18 @@ safe_printf(const char *format, ...)
     fflush(stdout);
 }
 
-
+/**
+ * Free an array of strings allocated by backtrace_symbols
+ */
+static void
+free_bt_symbols(char **symbols, int size)
+{
+    if (!symbols) return;
+    for (int i = 0; i < size; i++) {
+        free(symbols[i]);
+    }
+    free(symbols);
+}
 
 /**
  * Signal handler for catching crashes during tests
@@ -76,7 +86,7 @@ signal_handler(int sig)
 {
     test_interrupted = 1;
     safe_printf("Signal %d caught during test execution\n", sig);
-    
+
     /* Try to longjmp back to safety */
     longjmp(test_jmp_buf, sig);
 }
@@ -96,43 +106,43 @@ setup_signal_handlers(void)
 /**
  * Basic backtrace printing function with safety checks
  */
- static void
- print_trace_basic(void)
- {
-     void *array[MAX_FRAMES];
-     size_t size;
-     char **strings;
-     size_t i;
- 
-     memset(array, 0, sizeof(array));
- 
-     size = backtrace(array, MAX_FRAMES);
-     if (size == 0 || size > MAX_FRAMES) {
-         safe_printf("WARNING: backtrace returned unusual size: %zu\n", size);
-         return;
-     }
- 
-     strings = backtrace_symbols(array, size);
-     if (strings == NULL) {
-         safe_printf("ERROR: backtrace_symbols failed: %s\n", strerror(errno));
-         return;
-     }
- 
-     safe_printf("=== Basic Backtrace (%zu frames) ===\n", size);
-     for (i = 0; i < size && i < MAX_FRAMES; i++) {
-         if (strings[i] != NULL) {
-             char safe_str[256];
-             strncpy(safe_str, strings[i], sizeof(safe_str) - 1);
-             safe_str[sizeof(safe_str) - 1] = '\0';
-             safe_printf("[%2zu] %s\n", i, safe_str);
-         } else {
-             safe_printf("[%2zu] <null>\n", i);
-         }
-     }
-     safe_printf("\n");
- 
-     free(strings);
- }
+static void
+print_trace_basic(void)
+{
+    void *array[MAX_FRAMES];
+    size_t size;
+    char **strings;
+    size_t i;
+
+    memset(array, 0, sizeof(array));
+
+    size = backtrace(array, MAX_FRAMES);
+    if (size == 0 || size > MAX_FRAMES) {
+        safe_printf("WARNING: backtrace returned unusual size: %zu\n", size);
+        return;
+    }
+
+    strings = backtrace_symbols(array, size);
+    if (strings == NULL) {
+        safe_printf("ERROR: backtrace_symbols failed: %s\n", strerror(errno));
+        return;
+    }
+
+    safe_printf("=== Basic Backtrace (%zu frames) ===\n", size);
+    for (i = 0; i < size && i < MAX_FRAMES; i++) {
+        if (strings[i] != NULL) {
+            char safe_str[256];
+            strncpy(safe_str, strings[i], sizeof(safe_str) - 1);
+            safe_str[sizeof(safe_str) - 1] = '\0';
+            safe_printf("[%2zu] %s\n", i, safe_str);
+        } else {
+            safe_printf("[%2zu] <null>\n", i);
+        }
+    }
+    safe_printf("\n");
+
+    free_bt_symbols(strings, size);
+}
 
 /**
  * Detailed backtrace with additional safety checks
@@ -146,18 +156,18 @@ print_trace_detailed(void)
 
     memset(array, 0, sizeof(array));
     size = backtrace(array, MAX_FRAMES);
-    
+
     if (size == 0 || size > MAX_FRAMES) {
         safe_printf("WARNING: Invalid backtrace size: %zu\n", size);
         return;
     }
-    
+
     safe_printf("=== Detailed Backtrace (%zu frames) ===\n", size);
     safe_printf("Raw addresses:\n");
     for (i = 0; i < (int)size && i < MAX_FRAMES; i++) {
         safe_printf("[%2d] %p\n", i, array[i]);
     }
-    
+
     safe_printf("\nSymbolic information:\n");
     /* Flush stdout before using fd-based output */
     fflush(stdout);
@@ -168,69 +178,69 @@ print_trace_detailed(void)
 /**
  * Test basic functionality with error recovery
  */
- static void
- test_basic_functionality(test_result_t *result)
- {
-     void *array[MAX_FRAMES];
-     char **strings = NULL;
-     int size;
-     double start_time = get_time_ms();
-     int test_result;
- 
-     safe_printf("Running basic functionality tests...\n");
- 
-     if ((test_result = setjmp(test_jmp_buf)) != 0) {
-         safe_printf("Test crashed with signal %d, marking as failed\n", test_result);
-         result->failed++;
-         result->duration_ms = get_time_ms() - start_time;
-         return;
-     }
- 
-     memset(array, 0, sizeof(array));
-     size = backtrace(array, MAX_FRAMES);
-     if (size > 0 && size <= MAX_FRAMES) {
-         result->passed++;
-         safe_printf("✓ backtrace() returned %d frames\n", size);
-     } else {
-         result->failed++;
-         safe_printf("✗ backtrace() returned invalid size: %d\n", size);
-         result->duration_ms = get_time_ms() - start_time;
-         return;
-     }
- 
-     if (size > 0) {
-         strings = backtrace_symbols(array, size);
-         if (strings != NULL) {
-             result->passed++;
-             safe_printf("✓ backtrace_symbols() succeeded\n");
- 
-             int valid_strings = 0;
-             for (int i = 0; i < size && i < 3; i++) {
-                 if (strings[i] != NULL && strlen(strings[i]) > 0) {
-                     valid_strings++;
-                 }
-             }
-             if (valid_strings > 0) {
-                 safe_printf("✓ Found %d valid symbol strings\n", valid_strings);
-             }
-             free(strings);
-         } else {
-             result->failed++;
-             safe_printf("✗ backtrace_symbols() failed\n");
-         }
-     }
- 
-     if (size > 0) {
-         safe_printf("✓ Testing backtrace_symbols_fd():\n");
-         fflush(stdout);
-         int fd_count = (size < 5) ? size : 5;
-         backtrace_symbols_fd(array, fd_count, STDOUT_FILENO);
-         result->passed++;
-     }
- 
-     result->duration_ms = get_time_ms() - start_time;
- }
+static void
+test_basic_functionality(test_result_t *result)
+{
+    void *array[MAX_FRAMES];
+    char **strings = NULL;
+    int size;
+    double start_time = get_time_ms();
+    int test_result;
 
+    safe_printf("Running basic functionality tests...\n");
+
+    if ((test_result = setjmp(test_jmp_buf)) != 0) {
+        safe_printf("Test crashed with signal %d, marking as failed\n", test_result);
+        result->failed++;
+        result->duration_ms = get_time_ms() - start_time;
+        return;
+    }
+
+    memset(array, 0, sizeof(array));
+    size = backtrace(array, MAX_FRAMES);
+    if (size > 0 && size <= MAX_FRAMES) {
+        result->passed++;
+        safe_printf("✓ backtrace() returned %d frames\n", size);
+    } else {
+        result->failed++;
+        safe_printf("✗ backtrace() returned invalid size: %d\n", size);
+        result->duration_ms = get_time_ms() - start_time;
+        return;
+    }
+
+    if (size > 0) {
+        strings = backtrace_symbols(array, size);
+        if (strings != NULL) {
+            result->passed++;
+            safe_printf("✓ backtrace_symbols() succeeded\n");
+
+            int valid_strings = 0;
+            for (int i = 0; i < size && i < 3; i++) {
+                if (strings[i] != NULL && strlen(strings[i]) > 0) {
+                    valid_strings++;
+                }
+            }
+            if (valid_strings > 0) {
+                safe_printf("✓ Found %d valid symbol strings\n", valid_strings);
+            }
+            free_bt_symbols(strings, size);
+            strings = NULL;
+        } else {
+            result->failed++;
+            safe_printf("✗ backtrace_symbols() failed\n");
+        }
+    }
+
+    if (size > 0) {
+        safe_printf("✓ Testing backtrace_symbols_fd():\n");
+        fflush(stdout);
+        int fd_count = (size < 5) ? size : 5;
+        backtrace_symbols_fd(array, fd_count, STDOUT_FILENO);
+        result->passed++;
+    }
+
+    result->duration_ms = get_time_ms() - start_time;
+}
 
 /**
  * Test edge cases with robust error handling
@@ -294,7 +304,7 @@ test_edge_cases(test_result_t *result)
         } else {
             result->failed++;
             safe_printf("✗ backtrace_symbols(0) should return NULL\n");
-            if (strings) free(strings);
+            free_bt_symbols(strings, 0); // Defensive, but likely NULL
         }
     }
 
@@ -332,17 +342,17 @@ test_performance(test_result_t *result)
             safe_printf("✗ backtrace failed or returned invalid size at iteration %d\n", i);
             break;
         }
-        
+
         /* Add small delay to prevent overwhelming the system */
         if (i % 50 == 0) {
             usleep(1000); /* 1ms delay every 50 iterations */
         }
     }
     end_time = get_time_ms();
-    
+
     if (size > 0) {
         result->passed++;
-        safe_printf("✓ backtrace(): %.2f ms total, %.4f ms/call\n", 
+        safe_printf("✓ backtrace(): %.2f ms total, %.4f ms/call\n",
                end_time - start_time, (end_time - start_time) / TEST_ITERATIONS);
     }
 
@@ -352,28 +362,28 @@ test_performance(test_result_t *result)
     if (size > 0) {
         int symbol_iterations = TEST_ITERATIONS / 20; /* Even fewer iterations */
         start_time = get_time_ms();
-        
+
         for (i = 0; i < symbol_iterations; i++) {
             strings = backtrace_symbols(array, size);
             if (strings != NULL) {
-                free(strings);
+                free_bt_symbols(strings, size);
                 strings = NULL;
             } else {
                 result->failed++;
                 safe_printf("✗ backtrace_symbols failed at iteration %d\n", i);
                 break;
             }
-            
+
             /* More frequent delays for symbol resolution */
             if (i % 10 == 0) {
                 usleep(5000); /* 5ms delay every 10 iterations */
             }
         }
         end_time = get_time_ms();
-        
+
         if (i == symbol_iterations) {
             result->passed++;
-            safe_printf("✓ backtrace_symbols(): %.2f ms total, %.4f ms/call\n", 
+            safe_printf("✓ backtrace_symbols(): %.2f ms total, %.4f ms/call\n",
                    end_time - start_time, (end_time - start_time) / symbol_iterations);
         }
     }
@@ -429,17 +439,17 @@ recursive_function(int depth, int max_depth)
         safe_printf("Invalid recursion parameters: depth=%d, max_depth=%d\n", depth, max_depth);
         return;
     }
-    
+
     if (depth >= max_depth) {
         safe_printf("=== Recursive Backtrace (depth %d) ===\n", depth);
         print_trace_basic();
         return;
     }
-    
+
     /* Add some stack space and prevent tail call optimization */
     volatile int dummy = depth;
     (void)dummy;
-    
+
     recursive_function(depth + 1, max_depth);
 }
 
@@ -521,13 +531,13 @@ main(void)
     }
 
     safe_printf("\nOverall: %d passed, %d failed\n", total_passed, total_failed);
-    
+
     /* More lenient success criteria for CI environments */
     if (total_failed == 0 && total_passed > 0) {
         safe_printf("🎉 All tests passed!\n");
         return EXIT_SUCCESS;
     } else if (total_passed > total_failed && total_passed > 0) {
-        safe_printf("⚠️  Most tests passed (%d/%d), acceptable for CI.\n", 
+        safe_printf("⚠️  Most tests passed (%d/%d), acceptable for CI.\n",
                    total_passed, total_passed + total_failed);
         return EXIT_SUCCESS;
     } else {

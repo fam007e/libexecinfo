@@ -59,63 +59,36 @@ backtrace(void **buffer, int size)
 char **
 backtrace_symbols(void *const *buffer, int size)
 {
-    size_t clen, alen;
-    int i;
-    char **rval;
-    Dl_info info;
-    ptrdiff_t offset;
-
-    /* Note: buffer is marked __nonnull but we check anyway for robustness */
     if (size <= 0)
         return NULL;
 
-    clen = size * sizeof(char *);
-    rval = malloc(clen);
-    if (rval == NULL)
+    char **rval = malloc(size * sizeof(char *));
+    if (!rval)
         return NULL;
 
-    for (i = 0; i < size; i++) {
-        if (dladdr(buffer[i], &info) != 0) {
-            if (info.dli_sname == NULL)
-                info.dli_sname = "???";
-            if (info.dli_saddr == NULL)
-                info.dli_saddr = buffer[i];
-            
-            /* Use ptrdiff_t for safe pointer arithmetic */
-            offset = (char *)buffer[i] - (char *)info.dli_saddr;
-            
-            /* "0x01234567 <function+offset> at filename" */
-            alen = 2 +                      /* "0x" */
-                   (sizeof(void *) * 2) +   /* "01234567" */
-                   2 +                      /* " <" */
-                   strlen(info.dli_sname) + /* "function" */
-                   1 +                      /* "+" */
-                   20 +                     /* offset (increased for safety) */
-                   5 +                      /* "> at " */
-                   strlen(info.dli_fname) + /* "filename" */
-                   1;                       /* "\0" */
-            
-            rval = realloc_safe(rval, clen + alen);
-            if (rval == NULL)
-                return NULL;
-            
-            snprintf((char *) rval + clen, alen, "%p <%s+%td> at %s",
-              buffer[i], info.dli_sname, offset, info.dli_fname);
-        } else {
-            alen = 2 +                      /* "0x" */
-                   (sizeof(void *) * 2) +   /* "01234567" */
-                   1;                       /* "\0" */
-            rval = realloc_safe(rval, clen + alen);
-            if (rval == NULL)
-                return NULL;
-            snprintf((char *) rval + clen, alen, "%p", buffer[i]);
-        }
-        rval[i] = (char *) clen;
-        clen += alen;
-    }
+    for (int i = 0; i < size; i++) {
+        Dl_info info;
+        ptrdiff_t offset = 0;
+        char temp[512];
 
-    for (i = 0; i < size; i++)
-        rval[i] += (uintptr_t) rval;
+        if (dladdr(buffer[i], &info) != 0) {
+            if (!info.dli_sname) info.dli_sname = "???";
+            if (!info.dli_saddr) info.dli_saddr = buffer[i];
+            offset = (char *)buffer[i] - (char *)info.dli_saddr;
+            snprintf(temp, sizeof(temp), "%p <%s+%td> at %s",
+                     buffer[i], info.dli_sname, offset, info.dli_fname);
+        } else {
+            snprintf(temp, sizeof(temp), "%p", buffer[i]);
+        }
+
+        rval[i] = strdup(temp);
+        if (!rval[i]) {
+            // Free any previously allocated strings
+            for (int j = 0; j < i; j++) free(rval[j]);
+            free(rval);
+            return NULL;
+        }
+    }
 
     return rval;
 }
