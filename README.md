@@ -1,7 +1,7 @@
 # libexecinfo
 
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD_2--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
-[![Build Status](https://github.com/fam007e/libexecinfo/workflows/CI/badge.svg)](https://github.com/fam007e/libexecinfo/actions)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/fam007e/libexecinfo/.github%2Fworkflows%2Fbuild-release-libexecinfo.yml)
 [![AUR Package](https://img.shields.io/aur/version/libexecinfo)](https://aur.archlinux.org/packages/libexecinfo)
 
 A modern, BSD-licensed clone of the backtrace facility found in GNU libc. This library is primarily intended for porting Linux code to BSD platforms and other systems that don't have built-in backtrace support.
