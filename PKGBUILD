@@ -1,4 +1,4 @@
-# Maintainer: fam007e <faisalmoshiur@gmail.com>
+# Maintainer: fam007e <faisalmoshiur+libexecinfo@gmail.com>
 pkgname=libexecinfo
 pkgver=1.1.0
 pkgrel=1

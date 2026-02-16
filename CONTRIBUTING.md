@@ -348,7 +348,7 @@ Contributors will be recognized in:
 If you need help with contributing:
 
 - Open a GitHub issue with the "help wanted" label
-- Email the maintainer: faisalmoshiur@gmail.com
+- Email the maintainer: [email](mailto:faisalmoshiur+libexecinfo@gmail.com)
 - Check existing issues and discussions
 
 ---

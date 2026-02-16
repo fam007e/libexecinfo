@@ -317,7 +317,7 @@ This project is licensed under the BSD 2-Clause License - see the [LICENSE](LICE
 ## 📞 Support
 
 - **GitHub Issues**: [https://github.com/fam007e/libexecinfo/issues](https://github.com/fam007e/libexecinfo/issues)
-- **Email**: [faisalmoshiur@gmail.com](mailto:faisalmoshiur@gmail.com)
+- **Email**: [email](mailto:faisalmoshiur+libexecinfo@gmail.com)
 - **AUR Package**: [libexecinfo](https://aur.archlinux.org/packages/libexecinfo)
 
 ## 🔗 Related Projects
