@@ -36,10 +36,14 @@ ifeq ($(DEBUG), 1)
                       -fno-omit-frame-pointer
     SECURITY_LDFLAGS = -fsanitize=address
 else
-    SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+    SECURITY_CFLAGS = -fstack-protector-strong \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
                       -Wnull-dereference -Wstack-protector -Wtrampolines \
                       -fno-omit-frame-pointer
+    # Only add _FORTIFY_SOURCE if not already defined (e.g. by makepkg)
+    ifeq ($(findstring _FORTIFY_SOURCE,$(CFLAGS) $(CPPFLAGS)),)
+        SECURITY_CFLAGS += -D_FORTIFY_SOURCE=2
+    endif
     SECURITY_LDFLAGS =
 endif
 
@@ -48,21 +52,6 @@ STD_CFLAGS = -std=gnu11
 
 # Debug vs Release
 DEBUG ?= 0
-
-ifeq ($(DEBUG), 1)
-    SECURITY_CFLAGS = -fstack-protector-strong \
-                      -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                      -Wnull-dereference -Wstack-protector -Wtrampolines \
-                      -fsanitize=address \
-                      -fno-omit-frame-pointer
-    SECURITY_LDFLAGS = -fsanitize=address
-else
-    SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
-                      -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                      -Wnull-dereference -Wstack-protector -Wtrampolines \
-                      -fno-omit-frame-pointer
-    SECURITY_LDFLAGS =
-endif
 
 # Final flags
 EXECINFO_CFLAGS = $(CPPFLAGS) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) \
@@ -82,7 +71,7 @@ STATIC_LIB = libexecinfo.a
 SHARED_LIB = libexecinfo.so.$(VERSION)
 TEST_BINARY = test
 
-.PHONY: all static dynamic test test-dynamic clean install install-static install-dynamic \
+.PHONY: all static dynamic test-dynamic clean install install-static install-dynamic \
         install-headers install-pkgconfig uninstall help generate
 
 # Default target
@@ -116,7 +105,7 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 	$(CC) $(EXECINFO_CFLAGS) -fPIC -DPIC -o $@ $<
 
 # Test program
-test: $(TEST_BINARY)
+
 
 $(TEST_BINARY): test.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl

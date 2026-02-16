@@ -73,6 +73,7 @@ static void
 free_bt_symbols(char **symbols, int size)
 {
     if (!symbols) return;
+    (void)size;
     free(symbols);
 }
 

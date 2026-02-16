@@ -184,9 +184,11 @@ jobs:
       run: |
         VERSION=${{ steps.version.outputs.version }}
         BUILD_NUM=${{ steps.version.outputs.build_num }}
-        TAG="v${VERSION}.${BUILD_NUM}"
+        # Use full version (semver + build num) for distribution to match PKGBUILD expectations
+        FULL_VERSION="${VERSION}.${BUILD_NUM}"
+        TAG="v${FULL_VERSION}"
         BUILDROOT=$(mktemp -d)
-        SRCDIR="${BUILDROOT}/libexecinfo-${VERSION}"
+        SRCDIR="${BUILDROOT}/libexecinfo-${FULL_VERSION}"
         mkdir -p "$SRCDIR"
 
         # Core source files
@@ -221,10 +223,10 @@ jobs:
         export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
 
         # Create tarball with stable sorting and fixed owner/group
-        TARFILE="libexecinfo-${VERSION}.tar.gz"
+        TARFILE="libexecinfo-${FULL_VERSION}.tar.gz"
         (cd "$BUILDROOT" && \
           tar --sort=name --owner=0 --group=0 --numeric-owner \
-              --mtime="@${SOURCE_DATE_EPOCH}" -czf "$TARFILE" "libexecinfo-${VERSION}")
+              --mtime="@${SOURCE_DATE_EPOCH}" -czf "$TARFILE" "libexecinfo-${FULL_VERSION}")
 
         # Move tarball into release directory
         mkdir -p release
@@ -245,12 +247,43 @@ jobs:
         # Create the release (if already exists this will fail; we can use gh to create or upload)
         gh release create "${TAG}" --title "libexecinfo ${TAG}" --notes "Automated release ${TAG}" || true
         # Upload or replace the asset
-        gh release upload "${TAG}" "release/libexecinfo-${VERSION}.tar.gz" --clobber
-        gh release upload "${TAG}" "release/libexecinfo-${VERSION}.tar.gz.sha256" --clobber
-        gh release upload "${TAG}" "release/libexecinfo-${VERSION}.tar.gz.md5" --clobber
-        echo "Uploaded release libexecinfo-${VERSION}.tar.gz (sha256: ${SHA256})"
+        gh release upload "${TAG}" "release/libexecinfo-${FULL_VERSION}.tar.gz" --clobber
+        gh release upload "${TAG}" "release/libexecinfo-${FULL_VERSION}.tar.gz.sha256" --clobber
+        gh release upload "${TAG}" "release/libexecinfo-${FULL_VERSION}.tar.gz.md5" --clobber
+        echo "Uploaded release libexecinfo-${FULL_VERSION}.tar.gz (sha256: ${SHA256})"
 
-    - name: Update latest tag
+    - name: Generate and Upload PKGBUILD
+      run: |
+        TAG=${{ steps.make_tarball.outputs.tag }}
+        SHA256=${{ steps.make_tarball.outputs.sha256 }}
+        VERSION=${{ steps.version.outputs.version }}
+
+        if [ -f "PKGBUILD" ]; then
+            echo "Generating release PKGBUILD for version ${VERSION}..."
+
+            # Create a copy for the release
+            cp PKGBUILD PKGBUILD.release
+
+            # Update pkgver
+            sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD.release
+
+            # Reset pkgrel to 1
+            sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD.release
+
+            # Update sha256sums
+            sed -i "s/^sha256sums=('.*')/sha256sums=('${SHA256}')/" PKGBUILD.release
+
+            # Display content in log
+            echo "::group::Generated PKGBUILD"
+            cat PKGBUILD.release
+            echo "::endgroup::"
+
+            # Upload to release
+            gh release upload "${TAG}" "PKGBUILD.release#PKGBUILD" --clobber
+            echo "Uploaded PKGBUILD to release assets"
+        else
+            echo "PKGBUILD template not found."
+        fi
       run: |
         # Configure git with the token
         git config --global user.name "github-actions[bot]"
