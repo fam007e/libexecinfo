@@ -105,8 +105,6 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 	$(CC) $(EXECINFO_CFLAGS) -fPIC -DPIC -o $@ $<
 
 # Test program
-
-
 $(TEST_BINARY): test.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
 

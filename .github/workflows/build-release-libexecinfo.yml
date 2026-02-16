@@ -284,6 +284,8 @@ jobs:
         else
             echo "PKGBUILD template not found."
         fi
+
+    - name: Update latest tag
       run: |
         # Configure git with the token
         git config --global user.name "github-actions[bot]"
