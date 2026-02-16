@@ -31,15 +31,24 @@ LDFLAGS ?=
 ifeq ($(DEBUG), 1)
     SECURITY_CFLAGS = -fstack-protector-strong \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                      -Wnull-dereference -Wstack-protector -Wtrampolines \
+                      -Wnull-dereference -Wstack-protector \
                       -fsanitize=address \
                       -fno-omit-frame-pointer
+
+    ifneq ($(CC),clang)
+        SECURITY_CFLAGS += -Wtrampolines
+    endif
     SECURITY_LDFLAGS = -fsanitize=address
 else
     SECURITY_CFLAGS = -fstack-protector-strong \
                       -fPIC -Wall -Wextra -Wformat=2 -Wformat-security \
-                      -Wnull-dereference -Wstack-protector -Wtrampolines \
+                      -Wnull-dereference -Wstack-protector \
                       -fno-omit-frame-pointer
+
+    # Only add -Wtrampolines if supported (GCC specific)
+    ifneq ($(CC),clang)
+        SECURITY_CFLAGS += -Wtrampolines
+    endif
     # Only add _FORTIFY_SOURCE if not already defined (e.g. by makepkg)
     ifeq ($(findstring _FORTIFY_SOURCE,$(CFLAGS) $(CPPFLAGS)),)
         SECURITY_CFLAGS += -D_FORTIFY_SOURCE=2

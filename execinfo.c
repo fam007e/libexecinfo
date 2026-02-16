@@ -17,7 +17,7 @@
 #define D10(x) ceil(log10(((x) == 0) ? 2 : ((x) + 1)))
 #define MAX_STACK_BUFFER 4096
 
-inline static void *
+inline static void * __attribute__((unused))
 realloc_safe(void *ptr, size_t size)
 {
     void *nptr;
