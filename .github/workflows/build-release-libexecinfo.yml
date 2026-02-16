@@ -33,14 +33,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          /var/cache/apt/archives
-        key: ${{ runner.os }}-apt-${{ hashFiles('**/Makefile') }}
-        restore-keys: |
-          ${{ runner.os }}-apt-
+
 
     - name: Install dependencies
       run: |
@@ -237,13 +230,14 @@ jobs:
         echo "tarball=release/$TARFILE" >> $GITHUB_OUTPUT
         echo "sha256=$(cut -d' ' -f1 release/${TARFILE}.sha256)" >> $GITHUB_OUTPUT
         echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        echo "full_version=${FULL_VERSION}" >> $GITHUB_OUTPUT
 
     - name: Create or update GitHub release and upload tarball
       run: |
         TARPATH=${{ steps.make_tarball.outputs.tarball }}
         TAG=${{ steps.make_tarball.outputs.tag }}
         SHA256=${{ steps.make_tarball.outputs.sha256 }}
-        VERSION=${{ steps.version.outputs.version }}
+        FULL_VERSION=${{ steps.make_tarball.outputs.full_version }}
         # Create the release (if already exists this will fail; we can use gh to create or upload)
         gh release create "${TAG}" --title "libexecinfo ${TAG}" --notes "Automated release ${TAG}" || true
         # Upload or replace the asset
@@ -256,7 +250,7 @@ jobs:
       run: |
         TAG=${{ steps.make_tarball.outputs.tag }}
         SHA256=${{ steps.make_tarball.outputs.sha256 }}
-        VERSION=${{ steps.version.outputs.version }}
+        VERSION=${{ steps.make_tarball.outputs.full_version }}
 
         if [ -f "PKGBUILD" ]; then
             echo "Generating release PKGBUILD for version ${VERSION}..."
