@@ -34,7 +34,9 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      # Pinned to the full commit SHA of v4.4.0 (supply-chain hardening:
+      # a mutable tag is not an immutable release; Codacy flags tag pins).
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Enable i386 architecture
       if: matrix.arch == 'i686'
@@ -177,7 +179,9 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      # Pinned to the full commit SHA of v4.4.0 (supply-chain hardening:
+      # a mutable tag is not an immutable release; Codacy flags tag pins).
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
         # Default GITHUB_TOKEN suffices: every operation below (tag push,
