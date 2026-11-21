@@ -144,7 +144,15 @@ jobs:
         make clean
         make DEBUG=0 test
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
-        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test_runner
+        # Valgrind 3.26 can SIGILL during its own teardown on the 32-bit
+        # stack AFTER printing a complete, clean report, so the verdict
+        # comes from the report text, not the process exit code: a real
+        # memory error (or a valgrind crash before the summary) fails
+        # the greps below and the step.
+        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test_runner > valgrind-report.txt 2>&1 || true
+        grep -q "ERROR SUMMARY: 0 errors" valgrind-report.txt
+        grep -q "All heap blocks were freed -- no leaks are possible" valgrind-report.txt
+        tail -8 valgrind-report.txt
 
   # ARM32 (armv7) and AArch64 are intentionally absent: GCC does not
   # implement __builtin_return_address(N>0) on ARM32 (compile-time
