@@ -56,9 +56,15 @@ sudo make install
 - **Development tools**: Standard POSIX utilities
 
 ### Supported Architectures
-- **x86_64 / i686**: Fully validated in CI (native and multilib). Coverage includes GCC/Clang, Debug/Release builds, AddressSanitizer, and Valgrind memory leak checks.
-- **aarch64 / armv7h**: Verified in CI via QEMU emulation. Coverage includes GCC/Clang and Debug/Release builds (AddressSanitizer skipped due to known QEMU user-mode incompatibility).
-- **Other architectures**: Should work via GCC/Clang builtins; contributions for CI verification (e.g., RISC-V, s390x) are welcome!
+- **x86_64**: Fully validated in CI (GCC/Clang, Debug/Release, AddressSanitizer, Valgrind).
+- **i686**: Validated in CI (GCC/Clang, Debug/Release, ASan). 32-bit libc frames do not maintain frame pointers, so traces stop cleanly at the libc boundary; the walker never follows a frame chain link that fails to advance, instead of crashing on it.
+- **ARM32 (armv7) / AArch64**: **Not supported.** GCC does not implement `__builtin_return_address(N>0)` on ARM32 (compile-time "unsupported argument" diagnostic, evaluates to 0) and returns NULL for it on AArch64, so `backtrace()` always returns 0 frames there. This is a toolchain limitation of the frame-pointer builtin this library is built on; ARM support would require an asm-based frame-chain walker (contributions welcome).
+- **Other architectures**: May work where the toolchain supports `__builtin_return_address(N>0)`/`__builtin_frame_address(N>0)` and code is built with frame pointers (`-fno-omit-frame-pointer`). The walker stops cleanly instead of crashing when a frame chain breaks, but traces end at the last valid frame-pointer link.
+
+### Limitations
+- `backtrace()` requires the *calling program* to be built with frame pointers (`-fno-omit-frame-pointer`); unlike glibc, this walker does not read `.eh_frame` unwind tables, so optimized binaries without frame pointers yield short or empty traces.
+- The output format of `backtrace_symbols()` (`0x... <symbol+offset> at file`) differs from glibc's (`binary(symbol+offset)[addr]`); API-compatible, not output-identical.
+- `backtrace_symbols_fd()` is **not** async-signal-safe despite avoiding most allocations — it calls `dladdr()` and `snprintf()` (see the note in `execinfo.h`).
 
 ## 📖 Usage
 

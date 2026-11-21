@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,11 +75,33 @@ int
 backtrace(void **buffer, int size)
 {
     int i;
+    uintptr_t prev_fp = 0;
+
     if (size <= 0)
         return 0;
 
     for (i = 0; i < size; i++) {
-        void *addr = getreturnaddr(i);
+        uintptr_t fp = (uintptr_t)getframeaddr(i);
+        void *addr;
+
+        /*
+         * Trust the frame chain only while every link advances strictly
+         * upward: older (outer) frames live at higher addresses on all
+         * supported ABIs. A NULL link means we reached the outermost
+         * real frame -- the standard ABI stores 0 in its saved-FP slot.
+         * A non-NULL link that does not advance means some outer frame
+         * does not maintain a frame pointer (e.g. libc built with
+         * -fomit-frame-pointer, as on 32-bit targets); its slot holds
+         * garbage (a code address, 0x1, ...) and following it further
+         * dereferences invalid memory and can fault, as observed on
+         * i686 where libc's frames lack frame pointers. Stop cleanly
+         * and return what was gathered so far.
+         */
+        if (fp <= prev_fp)
+            break;
+        prev_fp = fp;
+
+        addr = getreturnaddr(i);
         if (addr == NULL)
             break;
         buffer[i] = addr;

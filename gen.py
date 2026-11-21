@@ -18,8 +18,12 @@ Boundary safety, for both generated functions:
   than crashing. frame_address(depth+2) and beyond would require
   dereferencing through that NULL, which does fault -- so callers must
   never query more than one level past the last level that returned
-  non-NULL. backtrace() in execinfo.c respects this by stopping its
-  loop the moment getreturnaddr() returns NULL.
+  non-NULL. backtrace() in execinfo.c respects this with two stop
+  conditions: it stops the moment getreturnaddr() returns NULL, and it
+  additionally checks each level's frame address (via getframeaddr())
+  before descending -- a link that fails to advance strictly upward
+  (broken chains left by FP-less libc frames hold garbage like 0x1)
+  terminates the walk before anything dereferences it.
 
   getreturnaddr() additionally guards with `if (!fp) return NULL`
   before calling __builtin_return_address() at the same level. This

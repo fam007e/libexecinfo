@@ -33,6 +33,13 @@ extern "C" {
  * @note This function may return NULL for levels beyond the actual
  *       call stack depth or if frame pointers are not available.
  *
+ * @note On ARM32 and AArch64, GCC does not implement
+ *       __builtin_return_address(N>0) (it emits an "unsupported
+ *       argument" diagnostic on ARM32 and evaluates to NULL on
+ *       AArch64), so this function always returns NULL there and
+ *       backtrace() yields 0 frames. ARM support would require an
+ *       asm-based frame-chain walker instead of these builtins.
+ *
  * @note Deliberately NOT marked __attribute__((pure)): its return value
  *       depends on the live machine call stack at the moment of the call,
  *       which is not "global memory" in the sense the `pure` attribute's

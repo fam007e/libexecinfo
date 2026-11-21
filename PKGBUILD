@@ -3,7 +3,10 @@ pkgname=libexecinfo
 pkgver=1.1.0.19
 pkgrel=3
 pkgdesc="BSD-licensed clone of backtrace facility found in GNU libc"
-arch=('x86_64' 'i686' 'aarch64' 'armv7h')
+# armv7h/aarch64 intentionally absent: GCC does not implement
+# __builtin_return_address(N>0) on ARM32 and returns NULL for it on
+# AArch64, so backtrace() would always return 0 frames there.
+arch=('x86_64' 'i686')
 url="https://github.com/fam007e/libexecinfo"
 license=('BSD')
 depends=('glibc')
