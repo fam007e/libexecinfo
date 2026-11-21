@@ -64,6 +64,14 @@ jobs:
           gcc-multilib \
           g++-multilib
 
+        # Valgrind on the i686 leg needs the 32-bit loader's symbols
+        # (libc6-dbg:i386); without them it aborts at startup with
+        # "a must-be-redirected function ... strlen ... in ld-linux.so.2
+        # was not found". Requires the i386 arch enabled above.
+        if [ "${{ matrix.arch }}" = "i686" ]; then
+          sudo apt-get install -y libc6-dbg:i386
+        fi
+
     - name: Set compiler
       run: |
         if [ "${{ matrix.compiler }}" = "clang" ]; then
