@@ -8,6 +8,8 @@ on:
       - '**.h'
       - '**.py'
       - 'Makefile'
+      - 'PKGBUILD'
+      - 'validation-script.sh'
       - '.github/workflows/**'
   pull_request:
     branches: ["main"]
