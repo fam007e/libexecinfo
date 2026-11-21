@@ -1,36 +1,73 @@
 #define _GNU_SOURCE
-#include <sys/types.h>
-#include <sys/uio.h>
 #include <dlfcn.h>
-#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdint.h>
 #include <errno.h>
 
 #include "execinfo.h"
 #include "stacktraverse.h"
 
-#define D10(x) ceil(log10(((x) == 0) ? 2 : ((x) + 1)))
 #define MAX_STACK_BUFFER 4096
 
-inline static void * __attribute__((unused))
-realloc_safe(void *ptr, size_t size)
+/*
+ * Look up symbol information for ADDR via dladdr() and format it the
+ * way glibc's backtrace_symbols() does: "<addr> <name+offset> at <file>",
+ * falling back to a bare "<addr>" when no symbol is found.
+ *
+ * Returns a malloc'd, exactly-sized, NUL-terminated string, or NULL on
+ * allocation failure. The caller owns the returned pointer.
+ *
+ * This replaces the previous approach of hand-computing the formatted
+ * length with a digit-counting macro (D10). That macro assumed the
+ * offset was always non-negative; dladdr() can return a symbol whose
+ * address is *higher* than the queried pointer (e.g. for PLT stubs),
+ * producing a negative offset, log10() of which is NaN, which produced
+ * a buffer too small for the real snprintf() output and corrupted the
+ * heap. snprintf(NULL, 0, ...) asks the C library to report the exact
+ * length it would have written, which is correct by construction for
+ * any offset, any symbol name length, and any file path length, with
+ * no fixed-size temp buffer to overflow or silently truncate into.
+ */
+static char *
+format_frame(void *addr)
 {
-    void *nptr;
-    if (size == 0 || size > SIZE_MAX / 2) {
-        free(ptr);
+    Dl_info info;
+    char *out;
+    int n;
+    int have_info = addr && (dladdr(addr, &info) != 0);
+
+    if (have_info) {
+        const char *sname = info.dli_sname ? info.dli_sname : "???";
+        void *saddr = info.dli_saddr ? info.dli_saddr : addr;
+        ptrdiff_t offset = (char *)addr - (char *)saddr;
+
+        n = snprintf(NULL, 0, "%p <%s+%td> at %s",
+                     addr, sname, offset, info.dli_fname);
+        if (n < 0)
+            return NULL;
+
+        out = malloc((size_t)n + 1);
+        if (out == NULL)
+            return NULL;
+
+        snprintf(out, (size_t)n + 1, "%p <%s+%td> at %s",
+                 addr, sname, offset, info.dli_fname);
+        return out;
+    }
+
+    n = snprintf(NULL, 0, "%p", addr);
+    if (n < 0)
         return NULL;
-    }
-    nptr = realloc(ptr, size);
-    if (nptr == NULL) {
-        free(ptr);
-        errno = ENOMEM;
-    }
-    return nptr;
+
+    out = malloc((size_t)n + 1);
+    if (out == NULL)
+        return NULL;
+
+    snprintf(out, (size_t)n + 1, "%p", addr);
+    return out;
 }
 
 int
@@ -52,111 +89,124 @@ backtrace(void **buffer, int size)
 char **
 backtrace_symbols(void *const *buffer, int size)
 {
+    char **formatted;
+    char **rval;
+    size_t *lens;
+    size_t total_len = 0;
+    char *cur;
+    int i;
+
     if (size <= 0)
         return NULL;
 
-    size_t total_len = 0;
-    char temp[512];
-    Dl_info info;
-    ptrdiff_t offset = 0;
-    int i;
-    for (i = 0; i < size; i++) {
-        if (!buffer[i]) {
-            snprintf(temp, sizeof(temp), "%p", buffer[i]);
-        } else if (dladdr(buffer[i], &info) != 0) {
-            if (!info.dli_sname) info.dli_sname = "???";
-            if (!info.dli_saddr) info.dli_saddr = buffer[i];
-            offset = (char *)buffer[i] - (char *)info.dli_saddr;
-            snprintf(temp, sizeof(temp), "%p <%s+%td> at %s",
-                     buffer[i], info.dli_sname, offset, info.dli_fname);
-        } else {
-            snprintf(temp, sizeof(temp), "%p", buffer[i]);
-        }
-        total_len += strlen(temp) + 1; // for '\0'
+    formatted = calloc((size_t)size, sizeof(char *));
+    if (formatted == NULL)
+        return NULL;
+
+    lens = malloc((size_t)size * sizeof(size_t));
+    if (lens == NULL) {
+        free(formatted);
+        return NULL;
     }
 
-    size_t ptrs_size = size * sizeof(char *);
-    char **rval = malloc(ptrs_size + total_len);
-    if (!rval) return NULL;
-
-    char *strings = (char *)(rval + size);
-    char *cur = strings;
     for (i = 0; i < size; i++) {
-        if (!buffer[i]) {
-            snprintf(temp, sizeof(temp), "%p", buffer[i]);
-        } else if (dladdr(buffer[i], &info) != 0) {
-            if (!info.dli_sname) info.dli_sname = "???";
-            if (!info.dli_saddr) info.dli_saddr = buffer[i];
-            offset = (char *)buffer[i] - (char *)info.dli_saddr;
-            snprintf(temp, sizeof(temp), "%p <%s+%td> at %s",
-                     buffer[i], info.dli_sname, offset, info.dli_fname);
-        } else {
-            snprintf(temp, sizeof(temp), "%p", buffer[i]);
+        formatted[i] = format_frame(buffer[i]);
+        if (formatted[i] == NULL) {
+            /* Roll back everything formatted so far before giving up. */
+            for (int j = 0; j < i; j++)
+                free(formatted[j]);
+            free(formatted);
+            free(lens);
+            return NULL;
         }
-        size_t len = strlen(temp) + 1;
-        memcpy(cur, temp, len);
+        lens[i] = strlen(formatted[i]) + 1; /* + NUL */
+        total_len += lens[i];
+    }
+
+    /* Single allocation: an array of `size` char* followed by the
+       packed string data, matching glibc's backtrace_symbols() layout
+       so callers can free() the returned array with one call. */
+    rval = malloc((size_t)size * sizeof(char *) + total_len);
+    if (rval == NULL) {
+        for (i = 0; i < size; i++)
+            free(formatted[i]);
+        free(formatted);
+        free(lens);
+        return NULL;
+    }
+
+    cur = (char *)(rval + size);
+    for (i = 0; i < size; i++) {
+        memcpy(cur, formatted[i], lens[i]);
         rval[i] = cur;
-        cur += len;
+        cur += lens[i];
+        free(formatted[i]);
     }
+
+    free(formatted);
+    free(lens);
     return rval;
 }
 
+/*
+ * Unlike backtrace_symbols(), this function avoids malloc() for the
+ * common case (short, stack-buffer-sized lines) so it remains usable
+ * in low-memory situations. It still calls dladdr() and snprintf(),
+ * neither of which POSIX guarantees to be async-signal-safe, so despite
+ * appearances this is NOT strictly safe to call from inside a signal
+ * handler on every platform -- see the note in execinfo.h.
+ */
 void
 backtrace_symbols_fd(void *const *buffer, int size, int fd)
 {
     int i, len;
     char *buf;
-    char static_buf[MAX_STACK_BUFFER];
+    char stack_buf[MAX_STACK_BUFFER];
     Dl_info info;
-    ptrdiff_t offset;
+    ptrdiff_t offset = 0;
     ssize_t written;
+    const char *sname = NULL;
+    void *saddr = NULL;
+    int have_info;
 
     if (size <= 0 || fd < 0)
         return;
 
     for (i = 0; i < size; i++) {
-        if (!buffer[i]) {
-            len = 2 + (sizeof(void *) * 2) + 2;
-            if (len <= MAX_STACK_BUFFER) {
-                buf = static_buf;
-            } else {
-                buf = malloc(len);
-                if (buf == NULL)
-                    return;
-            }
-            snprintf(buf, len, "%p\n", buffer[i]);
-        } else if (dladdr(buffer[i], &info) != 0) {
-            if (info.dli_sname == NULL)
-                info.dli_sname = "???";
-            if (info.dli_saddr == NULL)
-                info.dli_saddr = buffer[i];
-            offset = (char *)buffer[i] - (char *)info.dli_saddr;
-            len = 2 + (sizeof(void *) * 2) + 2 + strlen(info.dli_sname) + 1 +
-                  D10(offset) + 5 + strlen(info.dli_fname) + 2;
-            if (len <= MAX_STACK_BUFFER) {
-                buf = static_buf;
-            } else {
-                buf = malloc(len);
-                if (buf == NULL)
-                    return;
-            }
-            snprintf(buf, len, "%p <%s+%td> at %s\n",
-                buffer[i], info.dli_sname, offset, info.dli_fname);
+        have_info = buffer[i] && (dladdr(buffer[i], &info) != 0);
+
+        if (have_info) {
+            sname = info.dli_sname ? info.dli_sname : "???";
+            saddr = info.dli_saddr ? info.dli_saddr : buffer[i];
+            offset = (char *)buffer[i] - (char *)saddr;
+            len = snprintf(NULL, 0, "%p <%s+%td> at %s\n",
+                            buffer[i], sname, offset, info.dli_fname);
         } else {
-            len = 2 + (sizeof(void *) * 2) + 2;
-            if (len <= MAX_STACK_BUFFER) {
-                buf = static_buf;
-            } else {
-                buf = malloc(len);
-                if (buf == NULL)
-                    return;
-            }
-            snprintf(buf, len, "%p\n", buffer[i]);
+            len = snprintf(NULL, 0, "%p\n", buffer[i]);
         }
 
-        written = write(fd, buf, strlen(buf));
-        (void)written;
-        if (buf != static_buf)
+        if (len < 0)
+            continue; /* formatting error: skip this frame, keep going */
+
+        if ((size_t)len < sizeof(stack_buf)) {
+            buf = stack_buf;
+        } else {
+            buf = malloc((size_t)len + 1);
+            if (buf == NULL)
+                continue; /* OOM: skip this frame rather than abort the trace */
+        }
+
+        if (have_info) {
+            snprintf(buf, (size_t)len + 1, "%p <%s+%td> at %s\n",
+                     buffer[i], sname, offset, info.dli_fname);
+        } else {
+            snprintf(buf, (size_t)len + 1, "%p\n", buffer[i]);
+        }
+
+        written = write(fd, buf, (size_t)len);
+        (void)written; /* best-effort; nothing useful to do on a write() failure here */
+
+        if (buf != stack_buf)
             free(buf);
     }
 }

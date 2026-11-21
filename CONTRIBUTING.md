@@ -13,7 +13,7 @@ libexecinfo is a modern, cross-platform implementation of the backtrace facility
 Before contributing, make sure you have:
 
 - **C Compiler**: GCC 7+ or Clang 6+
-- **Python**: 3.6+ (for code generation)
+- **Python 3**: 3.6+ (for code generation; the build calls `python3` explicitly, not `python`, since the latter isn't guaranteed to exist on every distro)
 - **Make**: GNU Make
 - **Git**: For version control
 - **Development tools**: Standard POSIX utilities (autotools, pkg-config, etc.)
@@ -33,7 +33,7 @@ Before contributing, make sure you have:
 2. **Generate Source Files**
    ```bash
    # Generate the stacktraverse.c file with default depth
-   python gen.py --max-depth 128 --output stacktraverse.c
+   python3 gen.py --max-depth 128 --output stacktraverse.c
    ```
 
 3. **Build and Test**
@@ -49,11 +49,18 @@ Before contributing, make sure you have:
 
 ### C Code Style
 
-We follow a consistent C coding style based on modern C11 standards:
+We follow a consistent C coding style based on modern C11 standards. Note the brace placement differs between functions and control structures -- this matches the actual style used throughout `execinfo.c`, `stacktraverse.h`, and `test.c`, so match it rather than the more common "always same-line" convention:
 
 ```c
 // Function declarations
 int function_name(int param1, const char *param2);
+
+// Function definitions: opening brace on its OWN line
+int
+function_name(int param1, const char *param2)
+{
+    // code
+}
 
 // Variable declarations
 int variable_name = 0;
@@ -65,7 +72,7 @@ struct example_struct {
     char *member_two;
 };
 
-// Control structures
+// Control structures: opening brace on the SAME line
 if (condition) {
     // code
 } else {
@@ -80,8 +87,8 @@ for (int i = 0; i < limit; i++) {
 ### Key Guidelines
 
 - **Indentation**: 4 spaces (no tabs)
-- **Line length**: Maximum 80 characters
-- **Braces**: Opening brace on same line for functions and control structures
+- **Line length**: Aim for 80 characters where reasonable; long format strings and doc comments may exceed it, but avoid it for ordinary control flow
+- **Braces**: Own line for function definitions, same line for control structures (see above)
 - **Naming**: snake_case for functions and variables, UPPER_CASE for constants
 - **Comments**: Use `/* */` for multi-line, `//` for single-line
 - **Memory management**: Always check return values, avoid memory leaks
@@ -119,15 +126,18 @@ For the code generation scripts:
 
 3. **Test thoroughly**
    ```bash
-   # Run all tests
+   # Run all tests (static build)
    make test
+   
+   # Run the test binary against the dynamic build too
+   make test-dynamic
    
    # Test with different configurations
    make DEBUG=0 clean all test  # Release build
-   make DEBUG=1 clean all test  # Debug build
+   make DEBUG=1 clean all test  # Debug build (sanitizers enabled)
    
    # Test with different stack depths
-   python gen.py --max-depth 256 --output stacktraverse.c
+   python3 gen.py --max-depth 256 --output stacktraverse.c
    make clean all test
    ```
 
@@ -146,11 +156,14 @@ For the code generation scripts:
 
 ### Test Categories
 
-1. **Unit Tests**: Test individual functions
-2. **Integration Tests**: Test library integration
-3. **Platform Tests**: Cross-platform compatibility
-4. **Performance Tests**: Benchmark critical paths
-5. **Memory Tests**: Memory safety and leak detection
+`test.c` exercises these areas in a single binary (there are no separate `make test-unit`/`test-integration`/etc. targets -- everything runs through `make test`):
+
+1. **Basic functionality**: `backtrace()`, `backtrace_symbols()`, `backtrace_symbols_fd()` under normal conditions
+2. **Edge cases**: zero-size requests, single-frame requests, zero-count symbol resolution
+3. **Performance**: timed iteration counts for both `backtrace()` and `backtrace_symbols()`
+4. **Crash recovery**: signal-handler-based recovery so a crash in one test doesn't abort the whole suite
+
+When adding new functionality, extend the relevant section of `test.c` rather than introducing a new top-level test binary or Make target, unless the addition genuinely doesn't fit the existing structure.
 
 ### Writing Tests
 
@@ -177,16 +190,17 @@ void test_new_feature() {
 ### Running Tests
 
 ```bash
-# All tests
+# Build and run the full suite against the static library
 make test
 
-# Specific test categories
-make test-unit
-make test-integration
-make test-performance
+# Build and run the full suite against the dynamic library
+make test-dynamic
+```
 
-# Memory testing (if available)
-make test-memory
+For memory-safety checking, use a debug build with sanitizers rather than a separate target:
+
+```bash
+make DEBUG=1 clean all test
 ```
 
 ## 📝 Documentation
@@ -276,19 +290,20 @@ When filing a bug report, include:
 
 ### Version Numbering
 
-We follow semantic versioning (SemVer):
+We follow semantic versioning (SemVer) for the library's own `EXECINFO_VERSION_*` macros: 
 - **Major**: Breaking changes
 - **Minor**: New features, backward compatible
 - **Patch**: Bug fixes, backward compatible
 
+Note that the AUR package version (`pkgver` in `PKGBUILD`) uses an additional trailing component for packaging-specific revisions and isn't itself a strict SemVer string.
+
 ### Release Checklist
 
-1. Update version numbers
-2. Update CHANGELOG.md
-3. Run full test suite on all platforms
-4. Update documentation
-5. Create release tag
-6. Update package repositories (AUR, etc.)
+1. Update version numbers (`EXECINFO_VERSION_*` in `execinfo.h`, `pkgver`/`pkgrel` in `PKGBUILD`)
+2. Update documentation for any user-visible changes
+3. Run the full test suite (`make test` and `make test-dynamic`, both `DEBUG=0` and `DEBUG=1`)
+4. Create release tag matching the pinned tarball the PKGBUILD's `source=` line expects
+5. Update package repositories (AUR, etc.) and run `updpkgsums`
 
 ## 🤝 Community Guidelines
 
@@ -338,10 +353,7 @@ Before submitting a pull request:
 
 ## 🙏 Recognition
 
-Contributors will be recognized in:
-- CONTRIBUTORS.md file
-- Release notes for significant contributions
-- GitHub contributors list
+Significant contributions will be recognized in release notes and are visible via the GitHub contributors list for the repository.
 
 ## 📞 Getting Help
 

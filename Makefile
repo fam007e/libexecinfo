@@ -1,5 +1,4 @@
 # libexecinfo - BSD backtrace library
-# Modern Makefile for 2025
 
 # Build configuration
 CC ?= cc
@@ -72,15 +71,51 @@ SOURCES = execinfo.c stacktraverse.c
 OBJECTS = $(SOURCES:.c=.o)
 SHARED_OBJECTS = $(SOURCES:.c=.So)
 
+# --- Build-flag change detection -------------------------------------------
+# `make` only compares file mtimes; it has no idea that DEBUG=1 vs. DEBUG=0
+# (or any other CFLAGS change) means the *same* execinfo.c needs different
+# object code. If you build once with DEBUG=1 (ASan-instrumented objects)
+# and then run e.g. `make test` without DEBUG=1 and without an intervening
+# `make clean`, execinfo.c/stacktraverse.c are unchanged, so make reuses the
+# stale ASan objects in libexecinfo.a -- but links the new target without
+# -fsanitize=address, producing "undefined reference to __asan_*".
+#
+# Fix: record the flags actually used for the last build in a stamp file
+# and make the object files depend on it. The FORCE prerequisite makes the
+# stamp's recipe run on every invocation, but the recipe only rewrites (and
+# therefore only bumps the mtime of) the file when its content actually
+# differs -- so changing DEBUG correctly forces a rebuild, and repeated
+# `make`/`make test` calls with the *same* flags still do nothing.
+BUILD_SIG := $(EXECINFO_CFLAGS) $(SECURITY_LDFLAGS)
+
+.PHONY: FORCE
+FORCE:
+
+.build_sig: FORCE
+	@echo '$(BUILD_SIG)' | cmp -s - $@ 2>/dev/null || echo '$(BUILD_SIG)' > $@
+
+$(OBJECTS) $(SHARED_OBJECTS): .build_sig
+
+# Make's implicit "default goal = first target in the file" rule means
+# inserting FORCE/.build_sig above would otherwise silently make FORCE
+# the default goal for a bare `make` invocation. Pin it explicitly so
+# the default goal doesn't depend on where rules happen to be ordered.
+.DEFAULT_GOAL := all
+
 # Generated files
 GENERATED_FILES = stacktraverse.c
 
 # Targets
 STATIC_LIB = libexecinfo.a
 SHARED_LIB = libexecinfo.so.$(VERSION)
-TEST_BINARY = test
+# Named test_runner, not "test": a file literally named "test" would
+# collide with the PHONY target below of the same name, which is what
+# silently turned `make test` into a no-op in the previous Makefile
+# (make saw the file "test" already existed and considered it up to
+# date, so the recipe -- and the test binary -- never ran).
+TEST_BINARY = test_runner
 
-.PHONY: all static dynamic test-dynamic clean install install-static install-dynamic \
+.PHONY: all static dynamic test test-dynamic clean install install-static install-dynamic \
         install-headers install-pkgconfig uninstall help generate
 
 # Default target
@@ -102,7 +137,7 @@ $(STATIC_LIB): $(OBJECTS)
 dynamic: $(SHARED_LIB)
 
 $(SHARED_LIB): $(SHARED_OBJECTS)
-	$(CC) -shared -Wl,-soname,$(SONAME) $(EXECINFO_LDFLAGS) -o $@ $^ -lm -ldl
+	$(CC) -shared -Wl,-soname,$(SONAME) $(EXECINFO_LDFLAGS) -o $@ $^ -ldl
 	ln -sf $@ $(SONAME)
 	ln -sf $@ libexecinfo.so
 
@@ -113,26 +148,47 @@ $(SHARED_LIB): $(SHARED_OBJECTS)
 %.So: %.c
 	$(CC) $(EXECINFO_CFLAGS) -fPIC -DPIC -o $@ $<
 
-# Test program
+# Test program (static lib) -- PHONY `test` builds it and runs it,
+# propagating the binary's exit code so a CI/makepkg check() actually
+# fails when the tests fail.
+#
+# Linked against the .a file directly ($(STATIC_LIB), not -L. -lexecinfo):
+# when both libexecinfo.a and libexecinfo.so exist in the same -L
+# directory (true here, since `all` builds both), the linker resolves
+# -lexecinfo to the .so by default, regardless of this rule's
+# dependency on the static lib. That produced a binary that looked
+# statically tested but was actually dynamically linked, and then
+# failed at runtime because the freshly-built, not-yet-installed .so
+# isn't on the loader's search path. Naming the .a file explicitly
+# removes the ambiguity.
 $(TEST_BINARY): test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) $(SECURITY_CFLAGS) $(SECURITY_LDFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $@ $< $(STATIC_LIB) -ldl
 
-# Test using dynamic lib
+test: $(TEST_BINARY)
+	./$(TEST_BINARY)
+
+# Test using dynamic lib -- also actually runs now, with LD_LIBRARY_PATH
+# set so the freshly-built (not-yet-installed) .so is found.
 test-dynamic: test.c $(SHARED_LIB)
-	$(CC) $(CFLAGS) $(STD_CFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $(TEST_BINARY) $< -L. -lexecinfo -lm -ldl
+	$(CC) $(CFLAGS) $(STD_CFLAGS) $(BUILD_LDFLAGS) -rdynamic -o $(TEST_BINARY) $< -L. -lexecinfo -ldl
+	LD_LIBRARY_PATH=. ./$(TEST_BINARY)
 
-# Pkg-config file
-libexecinfo.pc:
-	@echo "prefix=$(PREFIX)" > $@
-	@echo "exec_prefix=$${prefix}" >> $@
-	@echo "libdir=$(LIBDIR)" >> $@
-	@echo "includedir=$(INCLUDEDIR)" >> $@
-	@echo "" >> $@
-	@echo "Name: libexecinfo" >> $@
-	@echo "Description: BSD backtrace library" >> $@
-	@echo "Version: $(VERSION)" >> $@
-	@echo "Libs: -L$${libdir} -lexecinfo -lm -ldl" >> $@
-	@echo "Cflags: -I$${includedir}" >> $@
+# Pkg-config file, generated from the libexecinfo.pc.in template via
+# plain variable substitution. The previous version built this file
+# with a sequence of `@echo ... >> $@` lines and tried to reference
+# earlier-written values via $${prefix} etc. -- but each `@echo` runs
+# in its own subshell, so $${prefix} expanded to the *shell's* (empty)
+# variable, not the value written into the file a line earlier. The
+# result was a .pc file with empty libdir/includedir/exec_prefix unless
+# patched afterward (which is what the PKGBUILD's prepare() step was
+# working around). Driving it from the template removes the need for
+# that downstream patch entirely.
+libexecinfo.pc: libexecinfo.pc.in
+	sed -e 's|@PREFIX@|$(PREFIX)|g' \
+	    -e 's|@LIBDIR@|$(LIBDIR)|g' \
+	    -e 's|@INCLUDEDIR@|$(INCLUDEDIR)|g' \
+	    -e 's|@VERSION@|$(VERSION)|g' \
+	    $< > $@
 
 # Install targets
 install: install-dynamic install-static install-headers install-pkgconfig
@@ -162,7 +218,7 @@ uninstall:
 
 # Clean
 clean:
-	rm -f *.o *.So *.a *.so *.so.* $(TEST_BINARY) libexecinfo.pc
+	rm -f *.o *.So *.a *.so *.so.* $(TEST_BINARY) libexecinfo.pc .build_sig
 	rm -f $(GENERATED_FILES)
 
 # Help
@@ -173,8 +229,8 @@ help:
 	@echo "  all              - Build static and dynamic libraries (default)"
 	@echo "  static           - Build static library only"
 	@echo "  dynamic          - Build dynamic library only"
-	@echo "  test             - Build test program (static lib)"
-	@echo "  test-dynamic     - Build test program (dynamic lib)"
+	@echo "  test             - Build AND RUN the test program (static lib)"
+	@echo "  test-dynamic     - Build AND RUN the test program (dynamic lib)"
 	@echo "  generate         - Generate stacktraverse.c"
 	@echo "  install          - Install everything"
 	@echo "  clean            - Clean build artifacts"

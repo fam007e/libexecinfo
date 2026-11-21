@@ -129,15 +129,21 @@ char **backtrace_symbols(void *const *buffer, int size) __THROW __nonnull((1)) _
  * 
  * This function is similar to backtrace_symbols() but writes the output
  * directly to a file descriptor instead of returning an array of strings.
- * This is useful when memory allocation might fail or when you want to
- * write to stderr or a log file.
  * 
  * @param buffer Array of return addresses from backtrace()
  * @param size Number of addresses in the array  
  * @param fd File descriptor to write to (e.g., STDERR_FILENO)
  * 
- * @note This function does not allocate memory and is safe to use in
- *       signal handlers or low-memory situations.
+ * @note Unlike backtrace_symbols(), this function avoids heap allocation
+ *       for lines that fit in its internal stack buffer, falling back to
+ *       malloc() only for unusually long symbol/file names.
+ * 
+ * @warning Despite the low-allocation design, this function is NOT
+ *       guaranteed async-signal-safe: it calls dladdr() and snprintf(),
+ *       neither of which POSIX lists as async-signal-safe (dladdr() may
+ *       take an internal dynamic-linker lock). Treat it as "safer than
+ *       backtrace_symbols() in low-memory conditions," not as "safe to
+ *       call from an arbitrary signal handler."
  * 
  * @note Each line of output is terminated with a newline character.
  * 

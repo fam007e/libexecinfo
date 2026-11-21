@@ -3,6 +3,7 @@
 
 # Object files
 *.o
+*.So
 *.ko
 *.obj
 *.elf
@@ -35,6 +36,11 @@
 *.i*86
 *.x86_64
 *.hex
+
+# Generated sources and build metadata
+stacktraverse.c
+.build_sig
+test_runner
 
 # Debug files
 *.dSYM/

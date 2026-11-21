@@ -6,5 +6,5 @@ includedir=@INCLUDEDIR@
 Name: libexecinfo
 Description: BSD backtrace library
 Version: @VERSION@
-Libs: -L${libdir} -lexecinfo
+Libs: -L${libdir} -lexecinfo -ldl
 Cflags: -I${includedir}

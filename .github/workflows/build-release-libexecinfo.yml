@@ -28,16 +28,28 @@ jobs:
       matrix:
         compiler: [gcc, clang]
         build_type: [debug, release]
+        arch: [x86_64, i686]
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-
+    - name: Enable i386 architecture
+      if: matrix.arch == 'i686'
+      run: |
+        sudo dpkg --add-architecture i386
+        # On Ubuntu 24.04, we need to explicitly add i386 to the sources file
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+          sudo sed -i 's/Architectures: amd64/Architectures: amd64 i386/g' /etc/apt/sources.list.d/ubuntu.sources
+        fi
+        sudo apt-get update -qq
 
     - name: Install dependencies
       run: |
-        sudo apt-get update -qq
+        # Only update if we didn't already for i386
+        if [ "${{ matrix.arch }}" != "i686" ]; then
+          sudo apt-get update -qq
+        fi
         sudo apt-get install -y \
           build-essential \
           python3 \
@@ -48,7 +60,9 @@ jobs:
           valgrind \
           gdb \
           libbfd-dev \
-          libiberty-dev
+          libiberty-dev \
+          gcc-multilib \
+          g++-multilib
 
     - name: Set compiler
       run: |
@@ -65,6 +79,14 @@ jobs:
           echo "CI=1" >> $GITHUB_ENV
         else
           echo "DEBUG=0" >> $GITHUB_ENV
+        fi
+
+    - name: Set Architecture Flags
+      run: |
+        if [ "${{ matrix.arch }}" = "i686" ]; then
+          # Include default optimization/debug flags to avoid unoptimized builds
+          echo "CFLAGS=-m32 -O2 -g" >> $GITHUB_ENV
+          echo "LDFLAGS=-m32" >> $GITHUB_ENV
         fi
 
     - name: Generate source files
@@ -88,13 +110,13 @@ jobs:
         # For clang release builds, use more conservative settings and enhanced gdb output
         if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "release" ]; then
           echo "Running conservative test for clang release build..."
-          timeout 30s ./test || {
+          timeout 30s ./test_runner || {
             echo "Test failed or timed out, checking with gdb (full backtrace)..."
-            gdb -batch -ex "set pagination off" -ex "run" -ex "bt full" -ex "info locals" -ex "info registers" -ex "quit" --args ./test
+            gdb -batch -ex "set pagination off" -ex "run" -ex "bt full" -ex "info locals" -ex "info registers" -ex "quit" --args ./test_runner
             exit 1
           }
         else
-          ./test
+          ./test_runner
         fi
 
         echo "Testing pkg-config generation..."
@@ -105,7 +127,7 @@ jobs:
       if: matrix.build_type == 'debug'
       run: |
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
-        ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./test
+        ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./test_runner
 
     # Rebuild without ASan for Valgrind memory leak check
     - name: Memory leak check (Valgrind, debug/gcc only, non-ASan build)
@@ -114,12 +136,41 @@ jobs:
         make clean
         make DEBUG=0 test
         export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"
-        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test
+        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 ./test_runner
+
+  test-arm-archs:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [aarch64, armv7]
+        compiler: [gcc, clang]
+        build_type: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: uraimo/run-on-arch-action@v3
+        name: Build and Test on ${{ matrix.arch }} (${{ matrix.compiler }}, ${{ matrix.build_type }})
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}
+          env: |
+            CC: ${{ matrix.compiler }}
+            DEBUG: 0
+            CFLAGS: ${{ matrix.build_type == 'debug' && '-O0 -g' || '-O2 -g' }}
+          install: |
+            apt-get update -q -y
+            apt-get install -q -y build-essential python3 pkg-config clang
+          run: |
+            make generate
+            make all
+            # make test builds AND runs the tests
+            make test
 
   create-release:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: build-and-test
+    needs: [build-and-test, test-arm-archs]
     runs-on: ubuntu-latest
+
 
     # Add specific permissions for this job
     permissions:

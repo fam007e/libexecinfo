@@ -36,7 +36,7 @@ git clone https://github.com/fam007e/libexecinfo.git
 cd libexecinfo
 
 # Generate source files (configurable stack depth)
-python gen.py --max-depth 128 --output stacktraverse.c
+python3 gen.py --max-depth 128 --output stacktraverse.c
 
 # Build
 make all
@@ -44,8 +44,8 @@ make all
 # Test
 make test
 
-# Install
-sudo make install PREFIX=/usr
+# Install (defaults to /usr/local/include/execinfo.h)
+sudo make install
 ```
 
 ## 📋 Requirements
@@ -54,6 +54,11 @@ sudo make install PREFIX=/usr
 - **Python**: 3.6+ (for code generation)
 - **Make**: GNU Make
 - **Development tools**: Standard POSIX utilities
+
+### Supported Architectures
+- **x86_64 / i686**: Fully validated in CI (native and multilib). Coverage includes GCC/Clang, Debug/Release builds, AddressSanitizer, and Valgrind memory leak checks.
+- **aarch64 / armv7h**: Verified in CI via QEMU emulation. Coverage includes GCC/Clang and Debug/Release builds (AddressSanitizer skipped due to known QEMU user-mode incompatibility).
+- **Other architectures**: Should work via GCC/Clang builtins; contributions for CI verification (e.g., RISC-V, s390x) are welcome!
 
 ## 📖 Usage
 
@@ -168,7 +173,7 @@ The library includes a comprehensive test suite:
 make test
 
 # Run specific test categories
-./test
+./test_runner
 
 # Performance testing
 make test DEBUG=0  # Optimized build for benchmarks
@@ -193,7 +198,7 @@ make DEBUG=1 clean all
 make DEBUG=0 clean all
 
 # Custom stack depth (default: 128)
-python gen.py --max-depth 256 --output stacktraverse.c
+python3 gen.py --max-depth 256 --output stacktraverse.c
 make clean all
 ```
 
@@ -268,7 +273,7 @@ pkg-config --exists libexecinfo && echo "OK" || echo "Missing"
 ```bash
 # Enable debug build
 make DEBUG=1 clean all
-./test
+./test_runner
 ```
 
 ## ⚡ Performance Notes
@@ -290,7 +295,7 @@ cd libexecinfo
 
 # Set up development environment
 make clean
-python gen.py --max-depth 128 --output stacktraverse.c
+python3 gen.py --max-depth 128 --output stacktraverse.c
 make DEBUG=1 all test
 ```
 
