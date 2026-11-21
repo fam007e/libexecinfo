@@ -11,7 +11,12 @@ url="https://github.com/fam007e/libexecinfo"
 license=('BSD')
 depends=('glibc')
 makedepends=('python')
+# Soname convention so packages can depend on libexecinfo.so directly.
+provides=('libexecinfo.so')
 conflicts=('libexecinfo-git')
+# Keep libexecinfo.a in the package: makepkg's default !staticlibs
+# would otherwise silently strip it during tidying.
+options=('staticlibs')
 
 # Pinned to the exact tagged release asset, not releases/latest/download/.
 # "latest" follows whatever release is newest at *build* time, so the

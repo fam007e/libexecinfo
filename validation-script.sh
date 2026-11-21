@@ -33,8 +33,11 @@ test_files() {
         "/usr/lib/libexecinfo.a"
         "/usr/lib/libexecinfo.so"
         "/usr/lib/libexecinfo.so.1"
-        "/usr/include/execinfo.h"
-        "/usr/include/stacktraverse.h"
+        # Headers install to /usr/include/libexecinfo/ (via INCLUDEDIR in
+        # the PKGBUILD), NOT the flat /usr/include/ -- checking there
+        # would falsely match glibc's own execinfo.h.
+        "/usr/include/libexecinfo/execinfo.h"
+        "/usr/include/libexecinfo/stacktraverse.h"
         "/usr/lib/pkgconfig/libexecinfo.pc"
     )
 
